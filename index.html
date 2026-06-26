@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -16240,9 +16241,47 @@ function authLogout() {
   var usuario = AUTH.currentUser ? AUTH.currentUser.usuario : '—';
   authLog("LOGOUT", "Saiu do sistema");
   tickerAdd({ tipo:'LOGOUT', usuario: usuario });
+  
+  // ════ LIMPEZA COMPLETA DO ESTADO ════
   AUTH.currentUser = null;
-  sessionStorage.removeItem("auth_u");
-  location.reload();
+  
+  // Limpar localStorage completamente
+  localStorage.clear();
+  
+  // Limpar sessionStorage
+  sessionStorage.clear();
+  
+  // Limpar IndexedDB
+  try {
+    if (window.indexedDB) {
+      indexedDB.databases().then(function(dbs) {
+        dbs.forEach(function(db) {
+          indexedDB.deleteDatabase(db.name);
+        });
+      }).catch(function(e) {
+        console.warn('[LOGOUT] Erro ao limpar IndexedDB:', e);
+      });
+    }
+  } catch(e) {
+    console.warn('[LOGOUT] IndexedDB não disponível:', e);
+  }
+  
+  // Resetar variáveis globais de permissão
+  if (window.AUTH) {
+    AUTH.permissions = {};
+    AUTH.userRole = null;
+    AUTH.userSectors = [];
+    AUTH.userShifts = [];
+  }
+  
+  // NOTA: NÃO desregistrar Service Worker durante logout
+  // Isso causava dados desaparecerem. Service Worker será
+  // recarregado automaticamente na próxima sessão.
+  
+  // Recarregar página depois de pequeno delay pra garantir limpeza
+  setTimeout(function() {
+    location.reload();
+  }, 100);
 }
 
 function authLog(tipo, desc) {
