@@ -1,4 +1,3 @@
-<!DOCTYPE html>
 <html lang="pt-BR"><head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -15960,6 +15959,17 @@ function _startAutoSync() {
 // Aplica dados vindos da nuvem na tela sem piscar
 function _aplicarDadosNuvem(nuvem) {
   try {
+    // ════ PROTEÇÃO CRÍTICA ════
+    // NUNCA permitir que dados reais sejam substituídos por nada/vazio
+    if (!nuvem || !Array.isArray(nuvem)) return;
+    
+    // Se a nuvem tem muito poucos dados (< 5), é certeza que algo tá errado
+    var totalNuvem = nuvem.length;
+    if (totalNuvem < 5) {
+      console.warn('[Sync] ⚠️  PROTEGIDO: Nuvem com ' + totalNuvem + ' registros (< 5 mínimo) — NÃO SOBRESCREVE dados locais!');
+      return;
+    }
+    
     // Proteção: se há edições offline com falha de upload E não é online,
     // não sobrescreve — as edições locais ainda não chegaram ao servidor
     var temPendente = localStorage.getItem('_pendingSync') === '1';
@@ -15967,19 +15977,24 @@ function _aplicarDadosNuvem(nuvem) {
 
     // Proteção: nunca substituir dados maiores por dados menores
     var totalAtual = colaboradores ? colaboradores.length : 0;
-    var totalNuvem = nuvem ? nuvem.length : 0;
-    if (totalNuvem < 5) {
-      console.warn('[Sync] Nuvem com poucos registros (' + totalNuvem + ') — ignorado');
-      return;
-    }
-    if (totalNuvem < totalAtual * 0.5 && Date.now() - _lastLocalEdit > 60000) {
-      console.warn('[Sync] Nuvem com muito menos registros (' + totalNuvem + ' vs ' + totalAtual + ') — ignorado');
+    
+    // Se nuvem tem MUITO menos dados (< 50% do atual), pode ser RLS bloqueando tabela
+    if (totalNuvem < totalAtual * 0.5) {
+      // Só aplica se passaram 60+ segundos desde última edição local
+      // (indica que dados locais estão estáveis, não em edição)
+      if (Date.now() - _lastLocalEdit < 60000) {
+        console.warn('[Sync] ⚠️  PROTEGIDO: Nuvem com ' + totalNuvem + ' vs ' + totalAtual + ' local (< 50%) — em edição (< 60s) — NÃO SOBRESCREVE!');
+        return;
+      }
+      console.warn('[Sync] ⚠️  Nuvem com ' + totalNuvem + ' registros vs ' + totalAtual + ' local (< 50%) — pode ser RLS');
       return;
     }
 
     var antes = JSON.stringify(colaboradores);
     var depois = JSON.stringify(nuvem);
     if (antes === depois) return; // nada mudou
+    
+    console.log('[Sync] ✅ Atualizando de ' + totalAtual + ' para ' + totalNuvem + ' registros');
     colaboradores = nuvem;
     colaboradores.forEach(function(c) {
       if (!c.status) c.status = 'ATIVO';
@@ -16241,47 +16256,9 @@ function authLogout() {
   var usuario = AUTH.currentUser ? AUTH.currentUser.usuario : '—';
   authLog("LOGOUT", "Saiu do sistema");
   tickerAdd({ tipo:'LOGOUT', usuario: usuario });
-  
-  // ════ LIMPEZA COMPLETA DO ESTADO ════
   AUTH.currentUser = null;
-  
-  // Limpar localStorage completamente
-  localStorage.clear();
-  
-  // Limpar sessionStorage
-  sessionStorage.clear();
-  
-  // Limpar IndexedDB
-  try {
-    if (window.indexedDB) {
-      indexedDB.databases().then(function(dbs) {
-        dbs.forEach(function(db) {
-          indexedDB.deleteDatabase(db.name);
-        });
-      }).catch(function(e) {
-        console.warn('[LOGOUT] Erro ao limpar IndexedDB:', e);
-      });
-    }
-  } catch(e) {
-    console.warn('[LOGOUT] IndexedDB não disponível:', e);
-  }
-  
-  // Resetar variáveis globais de permissão
-  if (window.AUTH) {
-    AUTH.permissions = {};
-    AUTH.userRole = null;
-    AUTH.userSectors = [];
-    AUTH.userShifts = [];
-  }
-  
-  // NOTA: NÃO desregistrar Service Worker durante logout
-  // Isso causava dados desaparecerem. Service Worker será
-  // recarregado automaticamente na próxima sessão.
-  
-  // Recarregar página depois de pequeno delay pra garantir limpeza
-  setTimeout(function() {
-    location.reload();
-  }, 100);
+  sessionStorage.removeItem("auth_u");
+  location.reload();
 }
 
 function authLog(tipo, desc) {
