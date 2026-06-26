@@ -1,0 +1,304 @@
+/* ════════════════════════════════════════════════════════ */
+/* DARK MODE v4.1 - SEGURO E CUSTOMIZÁVEL              */
+/* ════════════════════════════════════════════════════════ */
+
+/* PALETA DE CORES - CUSTOMIZE AQUI! */
+:root {
+  /* ── CORES PRINCIPAIS ── */
+  --cor-primaria: #2563eb;      /* Azul */
+  --cor-secundaria: #7c3aed;    /* Roxo */
+  --cor-sucesso: #10b981;       /* Verde */
+  --cor-atencao: #f97316;       /* Laranja */
+  --cor-critico: #ef4444;       /* Vermelho */
+  --cor-info: #3b82f6;          /* Azul claro */
+  
+  /* ── CORES DE FUNDO ── */
+  --fundo-principal: #0f172a;   /* Bem escuro */
+  --fundo-secundario: #1e293b;  /* Cinza-azul */
+  --fundo-tertiary: #334155;    /* Cinza médio */
+  --fundo-card: #1e293b;        /* Mesmo que secundário */
+  
+  /* ── CORES DE TEXTO ── */
+  --texto-principal: #f1f5f9;   /* Branco suave */
+  --texto-secundario: #cbd5e1;  /* Cinza claro */
+  --texto-muted: #94a3b8;       /* Cinza médio */
+  
+  /* ── BORDAS E SEPARADORES ── */
+  --borda: #475569;             /* Cinza escuro */
+  --divider: #334155;           /* Para separar sections */
+  
+  /* ── DESTAQUES ESPECÍFICOS ── */
+  --destaque-he: #10b981;       /* Verde - Horas Extras */
+  --destaque-faltas: #ef4444;   /* Vermelho - Faltas */
+  --destaque-atestados: #f59e0b; /* Amarelo - Atestados */
+  --destaque-ausencias: #f97316; /* Laranja - Ausências */
+  --destaque-reposicao: #8b5cf6; /* Roxo - Reposição */
+  --destaque-desligado: #64748b; /* Cinza - Desligado */
+}
+
+/* ════════════════════════════════════════════════════════ */
+/* APLICAR DARK MODE - SEM QUEBRAR NADA                   */
+/* ════════════════════════════════════════════════════════ */
+
+/* Fundo geral */
+html, body {
+  background: var(--fundo-principal) !important;
+  color: var(--texto-principal) !important;
+}
+
+/* Remover fundos brancos brutalmente */
+body > * {
+  background: var(--fundo-principal) !important;
+  color: var(--texto-principal) !important;
+}
+
+/* Div containers */
+div, section, article, main, .container {
+  color: var(--texto-principal) !important;
+}
+
+/* Texto padrão */
+p, span, label, h1, h2, h3, h4, h5, h6, li, a {
+  color: var(--texto-principal) !important;
+}
+
+/* Inputs e textareas */
+input, textarea, select {
+  background: var(--fundo-tertiary) !important;
+  color: var(--texto-principal) !important;
+  border: 1px solid var(--borda) !important;
+}
+
+input:focus, textarea:focus, select:focus {
+  outline: none !important;
+  border-color: var(--cor-primaria) !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1) !important;
+}
+
+/* Botões */
+button, .btn {
+  color: white !important;
+  border: none !important;
+  cursor: pointer !important;
+  transition: all 0.3s !important;
+}
+
+button:hover, .btn:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.3) !important;
+}
+
+/* Tabelas */
+table {
+  background: var(--fundo-secundario) !important;
+}
+
+table th {
+  background: var(--cor-primaria) !important;
+  color: white !important;
+}
+
+table td {
+  color: var(--texto-principal) !important;
+  border-color: var(--borda) !important;
+}
+
+table tr:hover {
+  background: var(--fundo-tertiary) !important;
+}
+
+/* Cards e painéis */
+.card, .panel, .box {
+  background: var(--fundo-secundario) !important;
+  border: 1px solid var(--borda) !important;
+  border-radius: 8px !important;
+}
+
+.card:hover {
+  border-color: var(--cor-primaria) !important;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.2) !important;
+}
+
+/* Headers e cabeçalhos */
+.header, header, .navbar {
+  background: var(--fundo-secundario) !important;
+  border-bottom: 1px solid var(--borda) !important;
+}
+
+/* Sidebars */
+.sidebar, aside {
+  background: var(--fundo-principal) !important;
+  border-right: 1px solid var(--borda) !important;
+}
+
+.sidebar a, aside a {
+  color: var(--texto-principal) !important;
+}
+
+.sidebar a:hover, aside a:hover {
+  background: var(--fundo-tertiary) !important;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--fundo-secundario);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--borda);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--cor-primaria);
+}
+
+/* ════════════════════════════════════════════════════════ */
+/* COMPONENTES ESPECÍFICOS                               */
+/* ════════════════════════════════════════════════════════ */
+
+/* Badges */
+.badge {
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.badge-success {
+  background: var(--destaque-he) !important;
+  color: white !important;
+}
+
+.badge-danger {
+  background: var(--destaque-faltas) !important;
+  color: white !important;
+}
+
+.badge-warning {
+  background: var(--destaque-atestados) !important;
+  color: white !important;
+}
+
+.badge-info {
+  background: var(--cor-info) !important;
+  color: white !important;
+}
+
+/* Alerts e notificações */
+.alert {
+  border-radius: 8px;
+  padding: 12px 16px;
+  border-left: 4px solid;
+}
+
+.alert-success {
+  background: rgba(16, 185, 129, 0.1) !important;
+  border-color: var(--destaque-he) !important;
+  color: var(--destaque-he) !important;
+}
+
+.alert-danger {
+  background: rgba(239, 68, 68, 0.1) !important;
+  border-color: var(--destaque-faltas) !important;
+  color: var(--destaque-faltas) !important;
+}
+
+.alert-warning {
+  background: rgba(245, 158, 11, 0.1) !important;
+  border-color: var(--destaque-atestados) !important;
+  color: var(--destaque-atestados) !important;
+}
+
+/* Modals */
+.modal, .dialog {
+  background: var(--fundo-secundario) !important;
+  border: 1px solid var(--borda) !important;
+}
+
+.modal-header {
+  border-bottom: 1px solid var(--borda) !important;
+  color: var(--texto-principal) !important;
+}
+
+/* Dropdowns */
+.dropdown, .select-dropdown {
+  background: var(--fundo-tertiary) !important;
+  border: 1px solid var(--borda) !important;
+  color: var(--texto-principal) !important;
+}
+
+.dropdown-item {
+  color: var(--texto-principal) !important;
+}
+
+.dropdown-item:hover {
+  background: var(--fundo-principal) !important;
+  color: var(--cor-primaria) !important;
+}
+
+/* Tabs */
+.nav-tabs .nav-link {
+  color: var(--texto-secundario) !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+}
+
+.nav-tabs .nav-link.active {
+  color: var(--cor-primaria) !important;
+  border-bottom-color: var(--cor-primaria) !important;
+  background: none !important;
+}
+
+.nav-tabs .nav-link:hover {
+  color: var(--texto-principal) !important;
+}
+
+/* Progress bars */
+.progress {
+  background: var(--fundo-tertiary) !important;
+}
+
+.progress-bar {
+  background: var(--cor-primaria) !important;
+}
+
+/* ════════════════════════════════════════════════════════ */
+/* UTILITÁRIOS                                           */
+/* ════════════════════════════════════════════════════════ */
+
+.text-muted {
+  color: var(--texto-muted) !important;
+}
+
+.text-secondary {
+  color: var(--texto-secundario) !important;
+}
+
+.bg-light {
+  background: var(--fundo-tertiary) !important;
+}
+
+.border {
+  border-color: var(--borda) !important;
+}
+
+.divider {
+  border-color: var(--divider) !important;
+}
+
+/* ════════════════════════════════════════════════════════ */
+/* PRINT/EXPORT - RESTAURAR CORES                       */
+/* ════════════════════════════════════════════════════════ */
+
+@media print {
+  * {
+    background: white !important;
+    color: black !important;
+  }
+}

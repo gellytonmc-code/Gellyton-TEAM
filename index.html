@@ -5604,11 +5604,38 @@ SUBSTITUTO KAREN NASCIMNETO">TROCADO</span></td><td><span class="editable-cell c
     </div>
 
 
+
     <div class="sec-title">
       <div class="dot"></div> Gráficos e Análises Estratégicas (Consolidado Anual)
       <button class="toggle-section-btn" id="btn-toggle-graficos" onclick="toggleDashSection('graficos-body','btn-toggle-graficos')" title="Ocultar/Exibir Gráficos">👁 Ocultar</button>
     </div>
     <div id="graficos-body" class="collapsible-body" style="max-height:4000px; opacity:1;">
+
+    <!-- ═══ GRÁFICO MENSAL JAN–DEZ ═══ -->
+    <div onclick="openChartZoom('chartMensalAnual')" style="
+        background:linear-gradient(135deg,#0f172a,#1e293b,#0f172a);
+        border-radius:18px;padding:24px 28px 20px;
+        box-shadow:0 8px 40px rgba(16,24,80,0.28),0 2px 8px rgba(0,0,0,0.35);
+        margin-bottom:20px;cursor:pointer;position:relative;overflow:hidden;">
+      <!-- Título registrado para o zoom pegar -->
+      <div id="title-chartMensalAnual" style="display:none;">📊 Evolução Mensal 2026 — Ativos · Presentes · H.E · Faltas · Atestados · Ausências · Reposição · Desligados</div>
+      <!-- Glow decorativo -->
+      <div style="position:absolute;top:-40px;right:-40px;width:180px;height:180px;background:radial-gradient(circle,rgba(56,189,248,0.12),transparent 70%);pointer-events:none;"></div>
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:16px;">
+        <div>
+          <div style="font-size:1rem;font-weight:800;color:#f1f5f9;letter-spacing:0.3px;">📊 Evolução Mensal 2026</div>
+          <div style="font-size:0.72rem;color:#94a3b8;margin-top:3px;">Clique para ampliar · Barras = ocorrências (eixo esq.) · Linha = ativos (eixo dir.)</div>
+        </div>
+        <!-- Legenda toggle -->
+        <div id="legend-mensal-anual" onclick="event.stopPropagation()" style="display:flex;flex-wrap:wrap;gap:5px;max-width:560px;justify-content:flex-end;"></div>
+      </div>
+      <div style="position:relative;height:320px;">
+        <canvas id="chartMensalAnual"></canvas>
+      </div>
+      <!-- Hint de zoom no canto inferior direito igual aos demais -->
+      <div style="position:absolute;bottom:10px;right:14px;font-size:0.65rem;color:rgba(148,163,184,0.5);pointer-events:none;">🔍 clique para ampliar</div>
+    </div>
+
     <div class="charts-grid">
       <!-- ═══ TOP 10 LADO A LADO: FALTAS | ATESTADOS ═══ -->
       <div style="grid-column:1/-1;display:grid;grid-template-columns:1fr 1fr;gap:18px;">
@@ -7645,6 +7672,21 @@ let _idbCarregarPromise = _idbCarregarColaboradores().catch(function(e) {
 function persistData() {
   // Registra timestamp de última edição local (usado pelo auto-sync)
   _lastLocalEdit = Date.now();
+  // Salva snapshot dos colaboradores recentemente editados para proteção de merge
+  if (typeof _localEdits !== 'undefined') {
+    colaboradores.forEach(function(c) {
+      var mat = c.mat != null ? String(c.mat) : null;
+      if (!mat) return;
+      var entrada = _localEdits[mat];
+      // Atualiza sempre: se já existe entrada recente, renova o timestamp e snapshot
+      _localEdits[mat] = { ts: Date.now(), dados: JSON.parse(JSON.stringify(c)) };
+    });
+    // Limpa entradas expiradas para não acumular memória
+    var agora = Date.now();
+    Object.keys(_localEdits).forEach(function(m) {
+      if (agora - _localEdits[m].ts > _LOCAL_EDIT_TTL * 2) delete _localEdits[m];
+    });
+  }
   // Salva os dados principais no IndexedDB (sem limite de 5MB)
   idbSet('absenteismo_2026_db', colaboradores).catch(function(e) {
     console.error('[IDB] Falha ao salvar dados principais:', e);
@@ -8385,8 +8427,19 @@ function getDashFilteredCols() {
 
 /* Retorna TODOS os colaboradores autorizados para o usuário (qualquer status), filtrado por setor + turno */
 function getColabsAutorizados(statusFiltro) {
+  // Determina se está filtrando um mês diferente do atual
+  var _mk = (typeof getMesKey === 'function') ? getMesKey() : null;
+  var _hoje2 = new Date();
+  var _mesAtualKey2 = _hoje2.getMonth() + '_' + _hoje2.getFullYear();
+  var _filtrandoMesPassado = _mk && _mk !== _mesAtualKey2;
+
   return colaboradores.filter(c => {
     if (statusFiltro && c.status !== statusFiltro) return false;
+    // Se está filtrando mês passado e pede ATIVO, só inclui quem tinha registro no mês
+    if (statusFiltro === 'ATIVO' && _filtrandoMesPassado) {
+      var diasMes = c.diasPorMes && c.diasPorMes[_mk];
+      if (!diasMes || Object.keys(diasMes).length === 0) return false;
+    }
     if (!colaboradorAutorizado(c)) return false;
     return true;
   });
@@ -9666,7 +9719,7 @@ function renderArchiveTable(tab) {
     else if (activeKpiFilter === 'REP') {
       const mesKey = currentMonth + '_' + currentYear;
       filtered = filtered.filter(c => {
-        const notas = (c.notasPorMes && c.notasPorMes[mesKey]) ? c.notasPorMes[mesKey] : (c.notas || {});
+        const notas = (c.notasPorMes && c.notasPorMes[mesKey]) ? c.notasPorMes[mesKey] : {};
         return Object.values(notas).some(n => n && /\[REP:\s*(?!Sem substituto)[^\]]+\]/i.test(n));
       });
     }
@@ -10032,8 +10085,20 @@ function renderTable(){
 
   // Lista base (Filtros de busca, setor e turno)
   // ── BLOQUEIO DE SETOR + TURNO: nunca mostra linhas fora do acesso do usuário (sempre em conjunto) ──
+  const _mk = getMesKey(); // chave do mês selecionado (ex: "3_2026")
+  const _hoje = new Date();
+  const _mesAtualKey = _hoje.getMonth() + '_' + _hoje.getFullYear();
+  const _filtrando_mes_passado = _mk !== _mesAtualKey;
   const baseActive = colaboradores.filter(c=>{
     if(c.status !== 'ATIVO') return false;
+    // ── SEPARAÇÃO POR MÊS: se está filtrando um mês diferente do atual,
+    // só mostra colaboradores que tinham registros naquele mês específico.
+    // Isso evita mostrar colaboradores admitidos após o mês filtrado.
+    if(_filtrando_mes_passado){
+      const diasMes = c.diasPorMes && c.diasPorMes[_mk];
+      const temRegistro = diasMes && Object.keys(diasMes).length > 0;
+      if(!temRegistro) return false;
+    }
     // Aplica restrição de setor + turno do usuário logado
     if (!colaboradorAutorizado(c)) return false;
     if(search && !c.nome.toLowerCase().includes(search) && !String(c.mat).includes(search) && !c.setor.toLowerCase().includes(search)) return false;
@@ -10052,7 +10117,7 @@ function renderTable(){
       if(activeKpiFilter === 'A' && countDays(c,'A') === 0) return false;
       if(activeKpiFilter === 'REP') {
         const mesKey = currentMonth + '_' + currentYear;
-        const notas = (c.notasPorMes && c.notasPorMes[mesKey]) ? c.notasPorMes[mesKey] : (c.notas || {});
+        const notas = (c.notasPorMes && c.notasPorMes[mesKey]) ? c.notasPorMes[mesKey] : {};
         const hasRep = Object.values(notas).some(n => n && /\[REP:\s*(?!Sem substituto)[^\]]+\]/i.test(n));
         if(!hasRep) return false;
       }
@@ -10532,7 +10597,7 @@ function updateMiniKpis(data, tab = 'checklist', baseTotalCount = null){
     const mesKey = currentMonth + '_' + currentYear;
     let atCount = 0;
     data.forEach(c => {
-      const dias = (c.diasPorMes && c.diasPorMes[mesKey]) ? c.diasPorMes[mesKey] : (c.dias || {});
+      const dias = (c.diasPorMes && c.diasPorMes[mesKey]) ? c.diasPorMes[mesKey] : {};
       Object.values(dias).forEach(v => { if(String(v).trim().toUpperCase() === 'A') atCount++; });
     });
     eatest.textContent = atCount;
@@ -10543,7 +10608,7 @@ function updateMiniKpis(data, tab = 'checklist', baseTotalCount = null){
     const mesKey = currentMonth + '_' + currentYear;
     let repCount = 0;
     data.forEach(c => {
-      const notas = (c.notasPorMes && c.notasPorMes[mesKey]) ? c.notasPorMes[mesKey] : (c.notas || {});
+      const notas = (c.notasPorMes && c.notasPorMes[mesKey]) ? c.notasPorMes[mesKey] : {};
       Object.values(notas).forEach(nota => {
         if(nota && /\[REP:\s*(?!Sem substituto)[^\]]+\]/i.test(nota)) repCount++;
       });
@@ -10946,10 +11011,11 @@ function saveMonthlyDayInline(colIdx, day) {
   else delete colab.notasPorMes[mk][String(day)];
 
   persistData();
+  // Marca este colaborador como editado localmente para proteção de merge
+  if (typeof _localEdits !== 'undefined' && colab.mat != null) {
+    _localEdits[String(colab.mat)] = { ts: Date.now(), dados: JSON.parse(JSON.stringify(colab)) };
+  }
   if(typeof recalcularTotais === 'function') recalcularTotais();
-  if(typeof showToast === 'function') showToast(`✅ Dia ${day} salvo!`);
-  // Atualiza resumo
-  populateMonthlyDetailsTable(colIdx);
 }
 
 // Exclui/limpa status e nota de um dia específico no modal mensal
@@ -11384,12 +11450,26 @@ function saveEmployee(){
       dias:{}, notas:{}, status:'ATIVO'});
   }
   closeEmployeeModal(); recalcularTotais();
+  // Marca colaborador como editado localmente para proteção de merge
+  if (typeof _localEdits !== 'undefined') {
+    var cEditado = colaboradores.find(function(x){ return String(x.mat) === String(mat); });
+    if (cEditado) _localEdits[String(mat)] = { ts: Date.now(), dados: JSON.parse(JSON.stringify(cEditado)) };
+  }
   // Notificação ticker
   var acao = (employeeEditIdx !== null) ? 'editou cadastro de' : 'cadastrou colaborador';
   tickerAdd({ tipo:'PERFIL', usuario: AUTH.currentUser ? AUTH.currentUser.usuario : '—', desc: acao + ' ' + nome });
 }
 let chartsCreated = {};
 function destroyChart(id){ if(chartsCreated[id]) { chartsCreated[id].destroy(); delete chartsCreated[id]; } }
+function toggleMensalSerie(idx) {
+  const chart = chartsCreated.chartMensalAnual;
+  if (!chart) return;
+  const meta = chart.getDatasetMeta(idx);
+  meta.hidden = !meta.hidden;
+  chart.update();
+  const el = document.getElementById('leg-mensal-' + idx);
+  if (el) el.style.opacity = meta.hidden ? '0.35' : '1';
+}
 function renderDashboard(){
   // ── BLOQUEIO: usa apenas colaboradores autorizados para o usuário logado ──
   const colabsAuth = getColabsAutorizados(); // respeita getSetoresUsuario()
@@ -11691,9 +11771,148 @@ function countMesAtestados(col) {
 }
 
 function renderCharts(k){
-  ['chartFaltas', 'chartPie', 'chartSetor', 'chartTurno', 'chartAnnualFaltas', 'chartAnnualAtestados', 'chartAtestadosMes', 'chartAnnualHE'].forEach(destroyChart);
+  ['chartFaltas', 'chartPie', 'chartSetor', 'chartTurno', 'chartAnnualFaltas', 'chartAnnualAtestados', 'chartAtestadosMes', 'chartAnnualHE', 'chartMensalAnual'].forEach(destroyChart);
   // ── BLOQUEIO: usa apenas colaboradores autorizados para o usuário logado ──
   const _colabsAuth = getColabsAutorizados();
+
+  // ═══ GRÁFICO MENSAL JAN–DEZ (Evolução por métrica) ═══
+  (function() {
+    const cma = document.getElementById('chartMensalAnual');
+    if (!cma) return;
+    const MESES = ['Jan','Fev','Mar','Abr','Mai','Jun','Jul','Ago','Set','Out','Nov','Dez'];
+    // Para cada mês, calcula as métricas dos colaboradores que tinham dados naquele mês
+    const dados = {
+      ativos:    [], presentes: [], he: [], faltas: [],
+      atestados: [], ausencias: [], reposicao: [], desligados: []
+    };
+    for (let m = 0; m < 12; m++) {
+      const mk = m + '_' + currentYear;
+      // Colaboradores ativos com registro no mês
+      const colsMes = _colabsAuth.filter(c => {
+        const dm = c.diasPorMes && c.diasPorMes[mk];
+        return dm && Object.keys(dm).length > 0;
+      });
+      const colsDesl = getColabsAutorizados().filter(c => {
+        if (c.status !== 'DESLIGADO') return false;
+        const dm = c.diasPorMes && c.diasPorMes[mk];
+        return dm && Object.values(dm).some(v => v && v.toString().toUpperCase() === 'DESLIGADO');
+      });
+      let p=0,he=0,f=0,a=0,aus=0,rep=0;
+      colsMes.forEach(c => {
+        const dias = (c.diasPorMes && c.diasPorMes[mk]) || {};
+        const notas = (c.notasPorMes && c.notasPorMes[mk]) || {};
+        Object.values(dias).forEach(v => {
+          const vn = (v||'').toString().toUpperCase();
+          if(vn === 'P') p++;
+          else if(vn === 'H.E') { p++; he++; }
+          else if(vn === 'F') f++;
+          else if(vn === 'A') a++;
+          else if(vn === 'DC') aus++;
+        });
+        Object.values(notas).forEach(nota => {
+          if(nota && /\[REP:\s*(?!Sem substituto)[^\]]+\]/i.test(nota)) rep++;
+        });
+      });
+      const totalAus = f + a + aus;
+      dados.ativos.push(colsMes.length);
+      dados.presentes.push(p);
+      dados.he.push(he);
+      dados.faltas.push(f);
+      dados.atestados.push(a);
+      dados.ausencias.push(totalAus);
+      dados.reposicao.push(rep);
+      dados.desligados.push(colsDesl.length);
+    }
+    const series = [
+      { key:'ativos',    label:'👥 Total Ativos',     color:'#38bdf8', type:'line',  yAxisID:'yR', tension:0.4, pointRadius:4, fill:false, borderWidth:2.5 },
+      { key:'presentes', label:'✅ Presentes/H.E',    color:'#4ade80', type:'bar',   yAxisID:'yL' },
+      { key:'he',        label:'⏰ Horas Extra',       color:'#facc15', type:'bar',   yAxisID:'yL' },
+      { key:'faltas',    label:'❌ Faltas',            color:'#f87171', type:'bar',   yAxisID:'yL' },
+      { key:'atestados', label:'🩺 Atestados',         color:'#c084fc', type:'bar',   yAxisID:'yL' },
+      { key:'ausencias', label:'⚠️ Ausências',         color:'#fb923c', type:'bar',   yAxisID:'yL' },
+      { key:'reposicao', label:'🔄 Reposição',         color:'#67e8f9', type:'bar',   yAxisID:'yL' },
+      { key:'desligados',label:'🌑 Desligados',        color:'#94a3b8', type:'bar',   yAxisID:'yL' },
+    ];
+    // Visibilidade padrão (começa com todas visíveis)
+    const hidden = {};
+    const datasets = series.map(s => {
+      const base = {
+        label: s.label,
+        data: dados[s.key],
+        backgroundColor: s.type === 'bar' ? s.color + 'bb' : undefined,
+        borderColor: s.color,
+        borderWidth: s.borderWidth || 1.5,
+        borderRadius: s.type === 'bar' ? 6 : undefined,
+        type: s.type,
+        yAxisID: s.yAxisID,
+        hidden: !!hidden[s.key],
+        order: s.type === 'line' ? 0 : 1,
+      };
+      if (s.type === 'line') {
+        base.tension = s.tension; base.pointRadius = s.pointRadius;
+        base.fill = s.fill; base.pointBackgroundColor = s.color;
+        base.pointBorderColor = '#0f172a'; base.pointBorderWidth = 2;
+      }
+      return base;
+    });
+    chartsCreated.chartMensalAnual = new Chart(cma, {
+      type: 'bar',
+      data: { labels: MESES, datasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            backgroundColor: 'rgba(15,23,42,0.97)',
+            borderColor: 'rgba(148,163,184,0.2)',
+            borderWidth: 1,
+            titleColor: '#f1f5f9',
+            bodyColor: '#cbd5e1',
+            padding: 12,
+            callbacks: {
+              title: ctx => '📅 ' + MESES[ctx[0].dataIndex] + ' / ' + currentYear,
+              label: ctx => {
+                const val = ctx.parsed.y;
+                if (val === 0) return null;
+                return ' ' + ctx.dataset.label + ': ' + val;
+              }
+            }
+          }
+        },
+        scales: {
+          yL: {
+            type: 'linear', position: 'left', beginAtZero: true,
+            ticks: { color: '#94a3b8', font: { size: 10 }, stepSize: 10 },
+            grid: { color: 'rgba(255,255,255,0.06)' },
+            border: { color: 'rgba(255,255,255,0.1)' },
+            title: { display: true, text: 'Dias/Ocorrências', color: '#64748b', font: { size: 9 } }
+          },
+          yR: {
+            type: 'linear', position: 'right', beginAtZero: true,
+            ticks: { color: '#38bdf8', font: { size: 10 }, stepSize: 5 },
+            grid: { drawOnChartArea: false },
+            border: { color: 'rgba(56,189,248,0.2)' },
+            title: { display: true, text: 'Ativos', color: '#38bdf8', font: { size: 9 } }
+          },
+          x: {
+            ticks: { color: '#e2e8f0', font: { size: 11, weight: '700' } },
+            grid: { display: false },
+            border: { color: 'rgba(255,255,255,0.1)' }
+          }
+        }
+      }
+    });
+    // Renderiza legenda custom com toggle
+    const legEl = document.getElementById('legend-mensal-anual');
+    if (legEl) {
+      legEl.innerHTML = series.map((s, i) =>
+        `<span onclick="toggleMensalSerie(${i})" id="leg-mensal-${i}" style="cursor:pointer;display:flex;align-items:center;gap:4px;background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.12);border-radius:20px;padding:3px 10px;font-size:0.68rem;font-weight:700;color:#e2e8f0;transition:0.2s;white-space:nowrap;">
+          <span style="width:10px;height:10px;border-radius:50%;background:${s.color};display:inline-block;flex-shrink:0;"></span>${s.label}
+        </span>`
+      ).join('');
+    }
+  })();
   
   // 1. Gráfico Anual de Faltas — Barras horizontais ranqueadas TOP 10
   const caf = document.getElementById('chartAnnualFaltas');
@@ -11820,101 +12039,152 @@ function renderCharts(k){
   }
 
   // 3. Distribuição (Doughnut)
-  const cp = document.getElementById('chartPie'); 
+  // ── Paleta e métricas compartilhadas ──
+  const _METRICAS_LABEL  = ['✅ Presentes/H.E','⏰ H.E','❌ Faltas','🩺 Atestados','⚠️ Ausências','🔄 Reposição','🌑 Desligados'];
+  const _METRICAS_COLOR  = ['#4ade80','#facc15','#f87171','#c084fc','#fb923c','#67e8f9','#94a3b8'];
+  const _METRICAS_KEY    = ['p','he','f','a','aus','rep','desl'];
+
+  // Função auxiliar: calcula as 7 métricas de um conjunto de colaboradores
+  function _calcMetricas(cols) {
+    let p=0,he=0,f=0,a=0,dc=0,rep=0,desl=0;
+    cols.forEach(c => {
+      p   += countAnnualDays(c,'P');
+      he  += countAnnualDays(c,'H.E');
+      f   += countAnnualDays(c,'F');
+      a   += countAnnualDays(c,'A');
+      dc  += countAnnualDays(c,'DC');
+      desl+= (c.status === 'DESLIGADO' ? 1 : 0);
+      const notasPorMes = c.notasPorMes || {};
+      Object.values(notasPorMes).forEach(nm => Object.values(nm||{}).forEach(nota => {
+        if(nota && /\[REP:\s*(?!Sem substituto)[^\]]+\]/i.test(nota)) rep++;
+      }));
+    });
+    // presentes inclui H.E (dias trabalhados com extra)
+    return { p: p+he, he, f, a, aus: f+a+dc, rep, desl };
+  }
+
+  // 3. Distribuição de Ocorrências — Rosca com as 7 métricas
+  const cp = document.getElementById('chartPie');
   if(cp){
-    chartsCreated.chartPie = new Chart(cp, { 
-      type: 'doughnut', 
+    const _mv = _calcMetricas(_colabsAuth);
+    const _pieData = _METRICAS_KEY.map(k2 => _mv[k2]);
+    chartsCreated.chartPie = new Chart(cp, {
+      type: 'doughnut',
       data: {
-        labels: ['P','F','H.E','A','DC','DESL','ENTR','SAIDA','TROC'],
+        labels: _METRICAS_LABEL,
         datasets: [{
-          data: [k.p, k.f, k.he, k.a, k.dc, k.desl, k.entr, k.said, k.troc],
-          backgroundColor: ['#27ae60','#e74c3c','#f1c40f','#8e44ad','#2980b9','#2c3e50','#2ecc71','#e67e22','#16a085'],
+          data: _pieData,
+          backgroundColor: _METRICAS_COLOR,
           borderWidth: 2,
           borderColor: 'white'
         }]
-      }, 
+      },
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: { 
-          legend: { 
-            position: 'bottom', 
-            labels: { font: { size: 10 }, boxWidth: 12, padding: 8 } 
-          } 
-        } 
-      } 
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 10 }, boxWidth: 12, padding: 8 } },
+          tooltip: { callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed}` } }
+        }
+      }
     });
+    const tl = document.getElementById('total-chartPie');
+    if(tl) tl.textContent = 'Total: ' + _pieData.reduce((a,b)=>a+b,0);
   }
 
-  // 4. Setor (Grouped Bar - Teal & Red)
-  const cs = document.getElementById('chartSetor'); 
+  // 4. Presenças vs Faltas por Setor — 7 métricas empilhadas por setor
+  const cs = document.getElementById('chartSetor');
   if(cs){
     const setores = getSetores();
-    chartsCreated.chartSetor = new Chart(cs, { 
-      type: 'bar', 
-      data: { 
-        labels: setores.map(s => s.length > 20 ? s.substring(0,18) + '…' : s), 
-        datasets: [
-          {
-            label: 'Presenças (Ano)',
-            data: setores.map(s => _colabsAuth.filter(c => c.setor === s).reduce((a,c) => a + countAnnualDays(c,'P'), 0)),
-            backgroundColor: '#1abc9c',
-            borderRadius: 4
-          },
-          {
-            label: 'Faltas (Ano)',
-            data: setores.map(s => _colabsAuth.filter(c => c.setor === s).reduce((a,c) => a + countAnnualDays(c,'F'), 0)),
-            backgroundColor: '#e74c3c',
-            borderRadius: 4
-          }
-        ]
-      }, 
+    const setDatasets = _METRICAS_LABEL.map((lbl, i) => ({
+      label: lbl,
+      data: setores.map(s => {
+        const cols = _colabsAuth.filter(c => c.setor === s);
+        return _calcMetricas(cols)[_METRICAS_KEY[i]];
+      }),
+      backgroundColor: _METRICAS_COLOR[i] + 'cc',
+      borderColor: _METRICAS_COLOR[i],
+      borderWidth: 1,
+      borderRadius: 3,
+      stack: 'set'
+    }));
+    chartsCreated.chartSetor = new Chart(cs, {
+      type: 'bar',
+      data: { labels: setores.map(s => s.length > 18 ? s.substring(0,16)+'…' : s), datasets: setDatasets },
       options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { 
-          x: { ticks: { font: { size: 9 } } }, 
-          y: { beginAtZero: true } 
-        } 
-      } 
+        responsive: true, maintainAspectRatio: false,
+        scales: {
+          x: { stacked: true, ticks: { font: { size: 8 }, maxRotation: 40, minRotation: 25 } },
+          y: { stacked: true, beginAtZero: true, ticks: { font: { size: 9 } } }
+        },
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { size: 9 }, boxWidth: 10, padding: 6 } },
+          tooltip: { mode: 'index', intersect: false }
+        }
+      }
     });
+    const tls = document.getElementById('total-chartSetor');
+    if(tls) {
+      const tot = setDatasets.reduce((a,ds)=>a+ds.data.reduce((b,v)=>b+v,0),0);
+      tls.textContent = 'Total: ' + tot;
+    }
   }
 
-  // 5. Turno (Stacked Bar - Diferenciado)
-  const ct = document.getElementById('chartTurno'); 
+  // 5. Ocorrências por Turno — 7 métricas empilhadas + linha de ativos
+  const ct = document.getElementById('chartTurno');
   if(ct){
     const turnos = getTurnos();
-    chartsCreated.chartTurno = new Chart(ct, { 
-      type: 'bar', 
-      data: { 
-        labels: turnos, 
-        datasets: [
-          {
-            label: 'Presenças',
-            data: turnos.map(t => _colabsAuth.filter(c => c.turno === t).reduce((a,c) => a + countAnnualDays(c,'P'), 0)),
-            backgroundColor: '#2ecc71',
-          },
-          {
-            label: 'Faltas',
-            data: turnos.map(t => _colabsAuth.filter(c => c.turno === t).reduce((a,c) => a + countAnnualDays(c,'F'), 0)),
-            backgroundColor: '#e67e22',
-          },
-          {
-            label: 'H.E',
-            data: turnos.map(t => _colabsAuth.filter(c => c.turno === t).reduce((a,c) => a + countAnnualDays(c,'H.E'), 0)),
-            backgroundColor: '#f1c40f',
-          }
-        ]
-      }, 
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: { 
-          x: { stacked: true },
-          y: { stacked: true, beginAtZero: true } 
-        } 
-      } 
+    const turnoDatasets = _METRICAS_LABEL.map((lbl, i) => ({
+      label: lbl,
+      data: turnos.map(t => {
+        const cols = _colabsAuth.filter(c => (c.turno||'') === t);
+        return _calcMetricas(cols)[_METRICAS_KEY[i]];
+      }),
+      backgroundColor: _METRICAS_COLOR[i] + 'cc',
+      borderColor: _METRICAS_COLOR[i],
+      borderWidth: 1,
+      borderRadius: 3,
+      stack: 'tur',
+      yAxisID: 'yL'
+    }));
+    // Linha de ativos por turno
+    turnoDatasets.push({
+      label: '👥 Total Ativos',
+      data: turnos.map(t => _colabsAuth.filter(c => c.status === 'ATIVO' && (c.turno||'') === t).length),
+      type: 'line',
+      borderColor: '#38bdf8',
+      backgroundColor: 'transparent',
+      borderWidth: 2.5,
+      pointRadius: 5,
+      pointBackgroundColor: '#38bdf8',
+      pointBorderColor: '#fff',
+      pointBorderWidth: 2,
+      tension: 0.35,
+      fill: false,
+      yAxisID: 'yR',
+      order: 0
     });
+    chartsCreated.chartTurno = new Chart(ct, {
+      type: 'bar',
+      data: { labels: turnos, datasets: turnoDatasets },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          yL: { type:'linear', position:'left',  stacked: true, beginAtZero: true, ticks: { font:{size:9} }, grid: { color:'rgba(0,0,0,0.06)' }, title:{display:true,text:'Dias/Ocorrências',font:{size:8}} },
+          yR: { type:'linear', position:'right', beginAtZero: true, ticks: { color:'#38bdf8', font:{size:9} }, grid:{drawOnChartArea:false}, title:{display:true,text:'Ativos',color:'#38bdf8',font:{size:8}} },
+          x:  { stacked: true, ticks: { font:{size:9} } }
+        },
+        plugins: {
+          legend: { position:'bottom', labels:{ font:{size:9}, boxWidth:10, padding:6 } },
+          tooltip: { mode:'index', intersect:false }
+        }
+      }
+    });
+    const tlt = document.getElementById('total-chartTurno');
+    if(tlt) {
+      const tot = turnoDatasets.slice(0,-1).reduce((a,ds)=>a+ds.data.reduce((b,v)=>b+v,0),0);
+      tlt.textContent = 'Total: ' + tot;
+    }
   }
 
   // 6. TOP 10 Atestados — Barras horizontais ranqueadas
@@ -12092,6 +12362,8 @@ let zoomChartInstance = null;
 let zoomOriginalData = null;
 let zoomOriginalType = null;
 let zoomOriginalIndexAxis = null;
+let zoomOriginalOptions = null; // guarda scales do gráfico original (para gráficos mistos)
+let zoomIsMixed = false;        // true quando o gráfico tem datasets de tipos diferentes
 
 function openChartZoom(chartId) {
   const originalChart = chartsCreated[chartId];
@@ -12120,6 +12392,12 @@ function openChartZoom(chartId) {
   zoomOriginalData = JSON.parse(JSON.stringify(originalChart.data));
   zoomOriginalType = originalChart.config.type;
   zoomOriginalIndexAxis = originalChart.options?.indexAxis || 'x';
+  zoomOriginalOptions = originalChart.options || null;
+
+  // Detecta gráfico misto (datasets com type diferente entre si)
+  const types = (zoomOriginalData.datasets || []).map(ds => ds.type).filter(Boolean);
+  const uniqueTypes = [...new Set(types)];
+  zoomIsMixed = uniqueTypes.length > 1 || (types.length > 0 && types[0] !== zoomOriginalType);
 
   _rebuildZoomChart(zoomOriginalType, zoomOriginalIndexAxis);
   _updateZoomTotal();
@@ -12158,13 +12436,43 @@ function _rebuildZoomChart(type, indexAxis) {
 
   if (!isPie) {
     baseOpts.indexAxis = indexAxis;
-    baseOpts.scales = {
-      x: { beginAtZero: true, ticks: { font: { size: 12, weight: '600' } }, grid: { color: 'rgba(0,0,0,0.06)' } },
-      y: { beginAtZero: true, ticks: { font: { size: 12, weight: '600' } }, grid: { color: 'rgba(0,0,0,0.06)' } }
-    };
-
+    // Se é gráfico misto (ex: chartMensalAnual), preserva os dois eixos do original
+    if (zoomIsMixed && zoomOriginalOptions && zoomOriginalOptions.scales) {
+      baseOpts.scales = JSON.parse(JSON.stringify(zoomOriginalOptions.scales));
+      // Ajusta cores para fundo branco do modal
+      ['yL','yR','x'].forEach(ax => {
+        if (baseOpts.scales[ax]) {
+          if (baseOpts.scales[ax].ticks) baseOpts.scales[ax].ticks.color = '#334155';
+          if (baseOpts.scales[ax].grid) baseOpts.scales[ax].grid.color = 'rgba(0,0,0,0.07)';
+          if (baseOpts.scales[ax].border) baseOpts.scales[ax].border.color = 'rgba(0,0,0,0.12)';
+          if (baseOpts.scales[ax].title) baseOpts.scales[ax].title.color = '#64748b';
+        }
+      });
+    } else {
+      baseOpts.scales = {
+        x: { beginAtZero: true, ticks: { font: { size: 12, weight: '600' } }, grid: { color: 'rgba(0,0,0,0.06)' } },
+        y: { beginAtZero: true, ticks: { font: { size: 12, weight: '600' } }, grid: { color: 'rgba(0,0,0,0.06)' } }
+      };
+    }
     // Plugin for data labels on bars
     baseOpts.plugins.datalabels_inline = true;
+  }
+
+  // Prepara dados: se misto e mudou para tipo uniforme (ex: clicou "Barras"), aplica o tipo a todos ds
+  // Se continua misto, preserva o type por dataset
+  const dataForZoom = JSON.parse(JSON.stringify(zoomOriginalData));
+  if (!zoomIsMixed || type !== zoomOriginalType) {
+    // Usuário escolheu um tipo específico — aplica a todos os datasets e normaliza para eixo único
+    dataForZoom.datasets.forEach(ds => {
+      delete ds.type;
+      delete ds.yAxisID;
+    });
+    if (baseOpts.scales && baseOpts.scales.yR) {
+      // Remove eixo direito se convertendo para tipo único
+      const yL = baseOpts.scales.yL;
+      delete baseOpts.scales.yR;
+      if (yL) { yL.display = true; delete baseOpts.scales.yL; baseOpts.scales.y = yL; }
+    }
   }
 
   // Use custom plugin for value labels
@@ -12213,7 +12521,7 @@ function _rebuildZoomChart(type, indexAxis) {
 
   zoomChartInstance = new Chart(canvas, {
     type: type,
-    data: JSON.parse(JSON.stringify(zoomOriginalData)),
+    data: dataForZoom,
     options: baseOpts,
     plugins: [datalabelsPlugin]
   });
@@ -12278,6 +12586,8 @@ function closeChartZoom() {
   modal.classList.remove('open');
   if (zoomChartInstance) { zoomChartInstance.destroy(); zoomChartInstance = null; }
   zoomOriginalData = null;
+  zoomOriginalOptions = null;
+  zoomIsMixed = false;
   // Devolve o modal ao body se foi movido para o elemento fullscreen
   if (modal._movedToFs) {
     document.body.appendChild(modal);
@@ -15925,6 +16235,8 @@ async function supaSave(dados, label) {
     _checkAutoBackup(true);
     try { localStorage.setItem('_pendingSync', '0'); } catch(_) {}
     try { localStorage.setItem('_lastSupaSave', String(dados.length)); } catch(_) {}
+    // Dados chegaram à nuvem — limpa proteção de merge (não precisa mais proteger)
+    if (typeof _localEdits !== 'undefined') { _localEdits = {}; }
     return true;
   } catch(e) {
     _showSyncBar('Offline — alterações salvas localmente', 'error');
@@ -15935,6 +16247,10 @@ async function supaSave(dados, label) {
 }
 
 var _lastLocalEdit = 0; // timestamp da última edição local
+// Rastreia edições por colaborador (mat → {timestamp, snapshot})
+// Protege edições locais durante o merge com a nuvem
+var _localEdits = {}; // { [mat]: { ts: Date.now(), dados: {...colab} } }
+var _LOCAL_EDIT_TTL = 120000; // 2 minutos: janela de proteção por colaborador
 
 function _startAutoSync() {
   if (_autoSyncTimer) clearInterval(_autoSyncTimer);
@@ -15993,14 +16309,96 @@ function _aplicarDadosNuvem(nuvem) {
     var antes = JSON.stringify(colaboradores);
     var depois = JSON.stringify(nuvem);
     if (antes === depois) return; // nada mudou
-    
-    console.log('[Sync] ✅ Atualizando de ' + totalAtual + ' para ' + totalNuvem + ' registros');
-    colaboradores = nuvem;
-    colaboradores.forEach(function(c) {
-      if (!c.status) c.status = 'ATIVO';
-      if (!c.diasPorMes) c.diasPorMes = {};
-      if (!c.notasPorMes) c.notasPorMes = {};
+
+    // ════ MERGE INTELIGENTE POR COLABORADOR ════
+    // Em vez de substituir tudo, preserva edições locais recentes
+    var agora = Date.now();
+    var mergeCount = 0, protegidos = 0;
+
+    // Monta índice da nuvem por mat para acesso rápido
+    var nuvemIdx = {};
+    nuvem.forEach(function(c) {
+      var mat = c.mat != null ? String(c.mat) : null;
+      if (mat) nuvemIdx[mat] = c;
     });
+
+    // Monta índice local por mat
+    var localIdx = {};
+    (colaboradores || []).forEach(function(c) {
+      var mat = c.mat != null ? String(c.mat) : null;
+      if (mat) localIdx[mat] = c;
+    });
+
+    // Constrói array mesclado
+    var mesclados = nuvem.map(function(cNuvem) {
+      cNuvem.status = cNuvem.status || 'ATIVO';
+      cNuvem.diasPorMes = cNuvem.diasPorMes || {};
+      cNuvem.notasPorMes = cNuvem.notasPorMes || {};
+
+      var mat = cNuvem.mat != null ? String(cNuvem.mat) : null;
+      if (!mat) return cNuvem;
+
+      // Verifica se há edição local recente para este colaborador
+      var editEntry = (typeof _localEdits !== 'undefined') ? _localEdits[mat] : null;
+      var editRecente = editEntry && (agora - editEntry.ts < _LOCAL_EDIT_TTL);
+
+      if (!editRecente) {
+        mergeCount++;
+        return cNuvem; // Sem edição local recente → usa nuvem normalmente
+      }
+
+      // Há edição local recente → merge campo a campo, priorizando local
+      protegidos++;
+      var cLocal = localIdx[mat] || editEntry.dados;
+      var merged = JSON.parse(JSON.stringify(cNuvem)); // parte da nuvem como base
+
+      // Campos de presença/notas: merge mês a mês (local vence em caso de conflito)
+      var mesesMerge = new Set(
+        Object.keys(cLocal.diasPorMes || {}).concat(Object.keys(cNuvem.diasPorMes || {}))
+      );
+      mesesMerge.forEach(function(mk) {
+        var diasLocal = (cLocal.diasPorMes || {})[mk] || {};
+        var diasNuvem = (cNuvem.diasPorMes || {})[mk] || {};
+        // Parte da nuvem, depois aplica local por cima (local sempre vence no TTL)
+        merged.diasPorMes[mk] = Object.assign({}, diasNuvem, diasLocal);
+      });
+
+      var mesesNota = new Set(
+        Object.keys(cLocal.notasPorMes || {}).concat(Object.keys(cNuvem.notasPorMes || {}))
+      );
+      mesesNota.forEach(function(mk) {
+        var notasLocal = (cLocal.notasPorMes || {})[mk] || {};
+        var notasNuvem = (cNuvem.notasPorMes || {})[mk] || {};
+        merged.notasPorMes[mk] = Object.assign({}, notasNuvem, notasLocal);
+      });
+
+      // Campos cadastrais: local vence se diferente (edição recente do usuário)
+      ['nome','setor','turno','admissao','demissao','inicio','fim','categoria','status'].forEach(function(f) {
+        if (cLocal[f] !== undefined && cLocal[f] !== cNuvem[f]) merged[f] = cLocal[f];
+      });
+
+      return merged;
+    });
+
+    // Preserva colaboradores locais que ainda não chegaram à nuvem
+    (colaboradores || []).forEach(function(cLocal) {
+      var mat = cLocal.mat != null ? String(cLocal.mat) : null;
+      if (mat && !nuvemIdx[mat]) {
+        var editEntry = (typeof _localEdits !== 'undefined') ? _localEdits[mat] : null;
+        if (editEntry && (agora - editEntry.ts < _LOCAL_EDIT_TTL)) {
+          mesclados.push(cLocal); // mantém colaborador local que ainda não subiu
+          protegidos++;
+        }
+      }
+    });
+
+    if (protegidos > 0) {
+      console.log('[Sync] 🛡️ Merge: ' + mergeCount + ' atualizados, ' + protegidos + ' protegidos (edição local recente)');
+    } else {
+      console.log('[Sync] ✅ Atualizando de ' + totalAtual + ' para ' + totalNuvem + ' registros');
+    }
+
+    colaboradores = mesclados;
     idbSet('absenteismo_2026_db', colaboradores).catch(function(e) {
       console.warn('[IDB] Falha ao salvar dados da nuvem, tentando localStorage:', e);
       _safeLsSet('absenteismo_2026_db', JSON.stringify(colaboradores));
@@ -16256,9 +16654,43 @@ function authLogout() {
   var usuario = AUTH.currentUser ? AUTH.currentUser.usuario : '—';
   authLog("LOGOUT", "Saiu do sistema");
   tickerAdd({ tipo:'LOGOUT', usuario: usuario });
+  
+  // ════ LIMPEZA COMPLETA DO ESTADO ════
   AUTH.currentUser = null;
-  sessionStorage.removeItem("auth_u");
-  location.reload();
+  
+  // Limpar localStorage completamente
+  localStorage.clear();
+  
+  // Limpar sessionStorage
+  sessionStorage.clear();
+  
+  // Limpar IndexedDB
+  try {
+    if (window.indexedDB) {
+      indexedDB.databases().then(function(dbs) {
+        dbs.forEach(function(db) {
+          indexedDB.deleteDatabase(db.name);
+        });
+      }).catch(function(e) {
+        console.warn('[LOGOUT] Erro ao limpar IndexedDB:', e);
+      });
+    }
+  } catch(e) {
+    console.warn('[LOGOUT] IndexedDB não disponível:', e);
+  }
+  
+  // Resetar variáveis globais de permissão
+  if (window.AUTH) {
+    AUTH.permissions = {};
+    AUTH.userRole = null;
+    AUTH.userSectors = [];
+    AUTH.userShifts = [];
+  }
+  
+  // ════ RECARREGAR (SEM desregistrar Service Worker) ════
+  setTimeout(function() {
+    location.reload();
+  }, 100);
 }
 
 function authLog(tipo, desc) {
