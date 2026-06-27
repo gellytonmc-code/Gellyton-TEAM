@@ -3,7 +3,7 @@
    Cache offline + atualização automática
 ═══════════════════════════════════════════════ */
 
-const CACHE_NAME = 'telao-v17k';
+const CACHE_NAME = 'telao-v17k-fix2';
 const ASSETS = [
   '/',
   '/index.html',
