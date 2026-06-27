@@ -16342,25 +16342,45 @@ function _aplicarDadosNuvem(nuvem) {
       var editEntry = (typeof _localEdits !== 'undefined') ? _localEdits[mat] : null;
       var editRecente = editEntry && (agora - editEntry.ts < _LOCAL_EDIT_TTL);
 
-      if (!editRecente) {
+      // ════ MERGE SEMPRE: preserva TODOS os meses do IDB local ════
+      // BUG CORRIGIDO: antes, quando não havia edição recente (TTL expirado),
+      // o código retornava os dados da nuvem diretamente, apagando meses como
+      // 4_2026 e 5_2026 que existiam no IDB mas não tinham sido sincronizados.
+      // Agora: SEMPRE faz merge de meses, nuvem vence conflitos dia a dia,
+      // mas meses que só existem localmente são PRESERVADOS.
+      var cLocal = localIdx[mat];
+      if (!cLocal && !editRecente) {
+        // Colaborador não existe no IDB local — usa nuvem diretamente
         mergeCount++;
-        return cNuvem; // Sem edição local recente → usa nuvem normalmente
+        return cNuvem;
       }
 
-      // Há edição local recente → merge campo a campo, priorizando local
-      protegidos++;
-      var cLocal = localIdx[mat] || editEntry.dados;
+      if (editRecente) protegidos++;
+      else mergeCount++;
+
+      if (!cLocal) cLocal = editEntry ? editEntry.dados : cNuvem;
       var merged = JSON.parse(JSON.stringify(cNuvem)); // parte da nuvem como base
 
-      // Campos de presença/notas: merge mês a mês (local vence em caso de conflito)
+      // Campos de presença/notas: merge mês a mês
+      // Nuvem vence conflitos nos meses que ela tem; meses extras do local são preservados
       var mesesMerge = new Set(
         Object.keys(cLocal.diasPorMes || {}).concat(Object.keys(cNuvem.diasPorMes || {}))
       );
       mesesMerge.forEach(function(mk) {
         var diasLocal = (cLocal.diasPorMes || {})[mk] || {};
         var diasNuvem = (cNuvem.diasPorMes || {})[mk] || {};
-        // Parte da nuvem, depois aplica local por cima (local sempre vence no TTL)
-        merged.diasPorMes[mk] = Object.assign({}, diasNuvem, diasLocal);
+        if (editRecente) {
+          // Edição recente: local vence conflitos (comportamento original protegido)
+          merged.diasPorMes[mk] = Object.assign({}, diasNuvem, diasLocal);
+        } else {
+          // Sem edição recente: nuvem vence conflitos dia a dia,
+          // mas meses extras que só existem no local são PRESERVADOS
+          if (Object.keys(diasNuvem).length > 0) {
+            merged.diasPorMes[mk] = Object.assign({}, diasLocal, diasNuvem); // nuvem vence
+          } else {
+            merged.diasPorMes[mk] = diasLocal; // mês só existe local → preserva
+          }
+        }
       });
 
       var mesesNota = new Set(
@@ -16369,13 +16389,23 @@ function _aplicarDadosNuvem(nuvem) {
       mesesNota.forEach(function(mk) {
         var notasLocal = (cLocal.notasPorMes || {})[mk] || {};
         var notasNuvem = (cNuvem.notasPorMes || {})[mk] || {};
-        merged.notasPorMes[mk] = Object.assign({}, notasNuvem, notasLocal);
+        if (editRecente) {
+          merged.notasPorMes[mk] = Object.assign({}, notasNuvem, notasLocal);
+        } else {
+          if (Object.keys(notasNuvem).length > 0) {
+            merged.notasPorMes[mk] = Object.assign({}, notasLocal, notasNuvem);
+          } else {
+            merged.notasPorMes[mk] = notasLocal;
+          }
+        }
       });
 
-      // Campos cadastrais: local vence se diferente (edição recente do usuário)
-      ['nome','setor','turno','admissao','demissao','inicio','fim','categoria','status'].forEach(function(f) {
-        if (cLocal[f] !== undefined && cLocal[f] !== cNuvem[f]) merged[f] = cLocal[f];
-      });
+      // Campos cadastrais: local vence se há edição recente
+      if (editRecente) {
+        ['nome','setor','turno','admissao','demissao','inicio','fim','categoria','status'].forEach(function(f) {
+          if (cLocal[f] !== undefined && cLocal[f] !== cNuvem[f]) merged[f] = cLocal[f];
+        });
+      }
 
       return merged;
     });
@@ -16535,12 +16565,36 @@ window.addEventListener('load', async function() {
   var nuvem = await supaLoad();
 
   if (nuvem && nuvem.length > 0) {
-    if (pendenteNoLoad && idbCount > nuvem.length) {
-      // IDB é mais completo e havia pendência offline: envia IDB para Supabase
-      await supaSave(colaboradores, 'Sync offline restaurado ' + new Date().toLocaleString('pt-BR'));
-    } else {
-      // Supabase tem dados: aplica (inclui caso de outro dispositivo ter editado)
-      _aplicarDadosNuvem(nuvem);
+    // ════ CORREÇÃO CRÍTICA ════
+    // Antes: se não havia _pendingSync, sobrescrevia tudo com a nuvem
+    //        → apagava meses (4_2026, 5_2026, 6_2026) que existiam no IDB local
+    // Agora: SEMPRE faz merge (nuvem + IDB), depois sobe o resultado completo
+    //        para garantir que a nuvem fique atualizada com todos os meses.
+
+    // Aplica merge (função _aplicarDadosNuvem já foi corrigida para preservar todos os meses)
+    _aplicarDadosNuvem(nuvem);
+
+    // Verifica se o IDB local tinha meses que a nuvem não tinha
+    // Se sim, sobe os dados mesclados para o Supabase
+    var idbTemMesesExtras = false;
+    if (_idbCarregouDadosReais && colaboradores && colaboradores.length > 0) {
+      var mesesNuvem = new Set();
+      nuvem.forEach(function(c) {
+        Object.keys(c.diasPorMes || {}).forEach(function(mk) { mesesNuvem.add(mk); });
+      });
+      colaboradores.forEach(function(c) {
+        Object.keys(c.diasPorMes || {}).forEach(function(mk) {
+          if (!mesesNuvem.has(mk)) idbTemMesesExtras = true;
+        });
+      });
+    }
+
+    if (pendenteNoLoad || idbTemMesesExtras) {
+      // IDB tinha dados novos (offline ou meses extras) → sobe tudo para a nuvem
+      var label = idbTemMesesExtras
+        ? 'Sync meses locais ' + new Date().toLocaleString('pt-BR')
+        : 'Sync offline restaurado ' + new Date().toLocaleString('pt-BR');
+      await supaSave(colaboradores, label);
     }
   } else if (idbCount > 10 && _idbCarregouDadosReais) {
     // Supabase vazio/inacessível E temos dados reais do IDB: envia
