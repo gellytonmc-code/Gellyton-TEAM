@@ -16,9 +16,32 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.6/purify.min.js"></script>
 <script>
   // Registra o Service Worker pra permitir abrir o app offline e instalar em qualquer dispositivo
+  // + força atualização automática: quando detecta uma versão nova do SW, ativa ela na hora
+  // e recarrega a página sozinho, pra nunca mais travar na versão antiga em cache.
   if ('serviceWorker' in navigator) {
+    let swRefreshing = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (swRefreshing) return;
+      swRefreshing = true;
+      window.location.reload();
+    });
     window.addEventListener('load', function () {
-      navigator.serviceWorker.register('./sw.js').catch(function (e) {
+      navigator.serviceWorker.register('./sw.js').then(function (reg) {
+        // Verifica se já existe uma atualização esperando
+        if (reg.waiting) reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+        // Escuta por novas versões encontradas durante a sessão
+        reg.addEventListener('updatefound', function () {
+          const novo = reg.installing;
+          if (!novo) return;
+          novo.addEventListener('statechange', function () {
+            if (novo.state === 'installed' && navigator.serviceWorker.controller) {
+              novo.postMessage({ type: 'SKIP_WAITING' });
+            }
+          });
+        });
+        // Força uma checagem de atualização a cada carregamento
+        reg.update();
+      }).catch(function (e) {
         console.warn('[SW] Falha ao registrar:', e);
       });
     });

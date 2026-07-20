@@ -2,8 +2,7 @@
    SERVICE WORKER - Sistema Telão v17k
    Cache offline + atualização automática
 ═══════════════════════════════════════════════ */
-
-const CACHE_NAME = 'telao-v17k-fix2';
+const CACHE_NAME = 'telao-v17k-fix3';
 const ASSETS = [
   '/',
   '/index.html',
@@ -11,7 +10,6 @@ const ASSETS = [
   '/icon-192.png',
   '/icon-512.png'
 ];
-
 /* ── Instala e faz cache dos assets principais ── */
 self.addEventListener('install', function(e) {
   e.waitUntil(
@@ -21,7 +19,6 @@ self.addEventListener('install', function(e) {
   );
   self.skipWaiting();
 });
-
 /* ── Ativa e limpa caches antigos ── */
 self.addEventListener('activate', function(e) {
   e.waitUntil(
@@ -34,8 +31,14 @@ self.addEventListener('activate', function(e) {
   );
   self.clients.claim();
 });
-
-/* ── Fetch: network-first para API, cache-first para assets ── */
+/* ── Recebe pedido do index.html para ativar a versão nova na hora ── */
+self.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
+  }
+});
+/* ── Fetch: network-first para a página principal (HTML) e Supabase,
+        cache-first para os demais assets (ícones, css, js) ── */
 self.addEventListener('fetch', function(e) {
   var url = e.request.url;
 
@@ -47,7 +50,35 @@ self.addEventListener('fetch', function(e) {
     return;
   }
 
-  /* Assets: cache-first */
+  /* Página principal (navegação / index.html / "/"): NETWORK-FIRST
+     Sempre busca a versão mais nova no servidor. Só cai pro cache
+     se estiver offline. Isso resolve o problema de ficar preso
+     na versão antiga depois de um novo upload. */
+  var isNavigation = e.request.mode === 'navigate' ||
+                      e.request.destination === 'document' ||
+                      url.endsWith('/index.html') ||
+                      /\/$/.test(new URL(url).pathname);
+
+  if (isNavigation) {
+    e.respondWith(
+      fetch(e.request).then(function(response) {
+        if (response && response.status === 200) {
+          var clone = response.clone();
+          caches.open(CACHE_NAME).then(function(cache) {
+            cache.put(e.request, clone);
+          });
+        }
+        return response;
+      }).catch(function() {
+        return caches.match(e.request).then(function(cached) {
+          return cached || caches.match('/index.html');
+        });
+      })
+    );
+    return;
+  }
+
+  /* Demais assets (ícones, css, js): cache-first */
   e.respondWith(
     caches.match(e.request).then(function(cached) {
       return cached || fetch(e.request).then(function(response) {
